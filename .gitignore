@@ -1,0 +1,8 @@
+generated_data/test_data/*.pkl
+build/
+figures/posteriors*
+figures/param_recovery*
+slurm_output/job*
+file_paths/*_file_paths.csv
+stan_output/*/
+.ipynb_checkpoints/

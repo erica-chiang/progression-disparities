@@ -1,0 +1,74 @@
+data {
+    int<lower=1> N;                                                     // number of patients
+    int<lower=1> N_obs;                                                 // number of observations
+    array[N_obs] int<lower=1, upper=N> patient_id;                      // person indices
+    int<lower=1> num_timesteps;                                         // max number of visits per patient (num timesteps)
+    int<lower=1> a_n;                                                   // number of demographic features (size of a)
+    matrix[N, a_n] a_per_patient;                                       // demographic feature(s) 
+    matrix[N_obs, a_n] a_per_visit;                                     // demographic feature(s) 
+    int<lower=1> x_n;                                                   // number of symptom features (size of x)
+    int x_n_constrained;
+    matrix[N_obs, x_n] X;                                               // observed features (symptoms)
+    vector<lower=0, upper=num_timesteps>[N_obs] t;                      // time stamp, each value ranges from 0 to num_timesteps-1
+    vector<lower=1>[N] num_patient_visits;                              // number of timesteps per patient
+    vector[N] patient_visit_timestep_sum;                               // each index i is the sum of timesteps when patient i came in
+
+    array[x_n] int<lower=0, upper=N_obs> num_measurements; // Length of each inner vector
+    array[x_n, N_obs] int<lower=0, upper=N_obs> measurement_times; // Ragged array of data
+}
+
+parameters {
+    vector<lower=0.5>[x_n_constrained] F_constrained;
+    vector[x_n - x_n_constrained] F_unconstrained;
+    vector[x_n] F_intercept;
+
+    vector[a_n] mu_r;
+    vector<lower=0>[a_n] sigma_r;
+    real mu_z0;
+    real<lower=0> sigma_z0;
+    vector<lower=0>[x_n] sigma_eps;
+
+    real beta_0;
+    real beta_a;
+    real<lower=0.1> beta_z;
+    
+    vector[N] r;
+    vector[N] z0;
+}
+
+transformed parameters {
+  vector[N_obs] z;
+  z = r[patient_id] .* t + z0[patient_id];
+}
+
+model {
+    F_intercept ~ normal(0, 1);
+    
+    mu_r ~ normal(1, 4);
+    sigma_r ~ normal(0.1, 0.4) T[0,];
+    sigma_eps ~ normal(5, 1) T[0,];
+    
+    beta_0 ~ normal(1.5, 0.1);
+    beta_a ~ normal(0, 2);
+    beta_z ~ normal(0.5, 0.1) T[0.1,];
+
+    F_constrained ~ normal(1, 1) T[0.5,];
+    F_unconstrained ~ normal(0, 2);
+
+    r ~ normal(a_per_patient * mu_r, a_per_patient * sigma_r);
+    z0 ~ normal(0, 1);
+    
+    vector[2] beta_a_with_anchor = [0, beta_a]';
+    vector[N] alpha = beta_0 + beta_z * z0 + a_per_patient * beta_a_with_anchor;
+    vector[N] beta_t = beta_z * r;
+    
+    target += alpha .* (num_patient_visits-1) + beta_t .* patient_visit_timestep_sum - exp(alpha) .* ((exp(beta_t * num_timesteps) - 1) ./ beta_t);
+    
+    for (i in 1:x_n) {
+        if (i <= x_n_constrained) {
+            target += normal_lpdf(X[measurement_times[i,:][1:num_measurements[i]], i] | F_constrained[i] * z[measurement_times[i,:][1:num_measurements[i]]] + F_intercept[i], sigma_eps[i]);
+        } else {
+            target += normal_lpdf(X[measurement_times[i,:][1:num_measurements[i]], i] | F_unconstrained[i - x_n_constrained] * z[measurement_times[i,:][1:num_measurements[i]]] + F_intercept[i], sigma_eps[i]);
+        }
+    }
+}
